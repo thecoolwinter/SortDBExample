@@ -12,25 +12,62 @@ struct ContentView: View {
     @Environment(\.managedObjectContext) private var viewContext
 
     @FetchRequest(
-        sortDescriptors: [NSSortDescriptor(keyPath: \Item.timestamp, ascending: true)],
+        sortDescriptors: [NSSortDescriptor(keyPath: \Item.order, ascending: true)],
         animation: .default)
     private var items: FetchedResults<Item>
 
     var body: some View {
-        List {
-            ForEach(items) { item in
-                Text("Item at \(item.timestamp!, formatter: itemFormatter)")
+        NavigationView {
+            List {
+                ForEach(items) { item in
+                    Text("Item order: \(item.order)")
+                }
+                .onDelete(perform: deleteItems)
+                .onMove(perform: { source, destination in
+                    /**
+                     # This is where we do most of our work
+                     */
+                    
+                    // Get all the items we're moving
+                    let sourceItems = source.map { items[$0] }
+                    
+                    var upper: Double
+                    var lower: Double
+                    
+                    // If the destination is at the end of the list, or the begining we do something different
+                    if destination == items.count {
+                        print("Appending to the end of the list")
+                        lower = items.last!.order
+                        upper = items.last!.order + 100.0
+                    } else if destination == 0 {
+                        print("Inserting into the begining")
+                        lower = 0.0
+                        upper = items.first?.order ?? 100.0
+                    } else {
+                        print("Inserting into the middle of the list")
+                        // Find the upper and lower sort around the destination and make some sort orders
+                        upper = items[destination - 1].order
+                        lower = items[destination].order
+                    }
+                    
+                    var newOrders: [Double] = stride(from: lower, to: upper, by: (upper - lower)/Double(sourceItems.count + 1)).map { $0 }
+                    newOrders.remove(at: 0)
+                    
+                    var i = 0
+                    source.forEach { index in
+                        items[index].order = newOrders[i]
+                        i += 1
+                    }
+                    
+                    try! viewContext.save()
+                    
+                })
             }
-            .onDelete(perform: deleteItems)
-        }
-        .toolbar {
-            #if os(iOS)
-            EditButton()
-            #endif
-
-            Button(action: addItem) {
+            .navigationTitle("Sort Items")
+            .navigationBarItems(leading: Button(action: addItem) {
                 Label("Add Item", systemImage: "plus")
-            }
+            },
+            trailing: EditButton())
         }
     }
 
@@ -38,15 +75,13 @@ struct ContentView: View {
         withAnimation {
             let newItem = Item(context: viewContext)
             newItem.timestamp = Date()
-
-            do {
-                try viewContext.save()
-            } catch {
-                // Replace this implementation with code to handle the error appropriately.
-                // fatalError() causes the application to generate a crash log and terminate. You should not use this function in a shipping application, although it may be useful during development.
-                let nsError = error as NSError
-                fatalError("Unresolved error \(nsError), \(nsError.userInfo)")
+            if items.count > 0 {
+                newItem.order = items.last!.order + 25.0
+            } else {
+                newItem.order = 100.0
             }
+
+            try! viewContext.save()
         }
     }
 
@@ -54,14 +89,7 @@ struct ContentView: View {
         withAnimation {
             offsets.map { items[$0] }.forEach(viewContext.delete)
 
-            do {
-                try viewContext.save()
-            } catch {
-                // Replace this implementation with code to handle the error appropriately.
-                // fatalError() causes the application to generate a crash log and terminate. You should not use this function in a shipping application, although it may be useful during development.
-                let nsError = error as NSError
-                fatalError("Unresolved error \(nsError), \(nsError.userInfo)")
-            }
+            try! viewContext.save()
         }
     }
 }
@@ -78,3 +106,4 @@ struct ContentView_Previews: PreviewProvider {
         ContentView().environment(\.managedObjectContext, PersistenceController.preview.container.viewContext)
     }
 }
+
